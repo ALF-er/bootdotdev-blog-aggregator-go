@@ -14,13 +14,11 @@ type Config struct {
 func Read() (*Config, error) {
 	filePath, err := getConfigFilePath()
 	if err != nil {
-		// panic(err)
 		return nil, fmt.Errorf("error while reading config")
 	}
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		// panic(err)
 		return nil, fmt.Errorf("error while reading config")
 	}
 	defer file.Close()
@@ -28,7 +26,6 @@ func Read() (*Config, error) {
 	var payload Config
 	decoder := json.NewDecoder(file)
 	if err := decoder.Decode(&payload); err != nil {
-		// panic(err)
 		return nil, fmt.Errorf("error while reading config")
 	}
 
@@ -38,13 +35,11 @@ func Read() (*Config, error) {
 func (c Config) SetUser(userName string) error {
 	filePath, err := getConfigFilePath()
 	if err != nil {
-		// panic(err)
 		return fmt.Errorf("error while setting user")
 	}
 
 	file, err := os.Create(filePath)
 	if err != nil {
-		// panic(err)
 		return fmt.Errorf("error while setting user")
 	}
 	defer file.Close()
@@ -53,7 +48,6 @@ func (c Config) SetUser(userName string) error {
 
 	encoder := json.NewEncoder(file)
 	if err := encoder.Encode(c); err != nil {
-		// panic(err)
 		return fmt.Errorf("error while setting user")
 	}
 
@@ -64,7 +58,6 @@ func getConfigFilePath() (string, error) {
 	home, err := os.UserHomeDir()
 
 	if err != nil {
-		// panic(err)
 		return "", fmt.Errorf("error while reading config path")
 	}
 
