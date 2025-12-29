@@ -55,6 +55,8 @@ func main() {
 	commandsMap.register("reset", handlerReset)
 	commandsMap.register("users", handlerUsers)
 	commandsMap.register("agg", handlerAggregate)
+	commandsMap.register("addfeed", handlerAddFeed)
+	commandsMap.register("feeds", handlerFeeds)
 
 	if len(os.Args) < 2 {
 		fmt.Println("specify some command")
@@ -105,7 +107,7 @@ func handlerLogin(s *state, cmd command) error {
 		return fmt.Errorf("there should be one argument for login command - user name")
 	}
 
-	_, err := s.db.GetUser(context.Background(), cmd.arguments[0])
+	_, err := s.db.GetUserByName(context.Background(), cmd.arguments[0])
 	if err != nil {
 		fmt.Println("no such user")
 
@@ -177,6 +179,62 @@ func handlerAggregate(s *state, cmd command) error {
 	}
 
 	fmt.Println(*feed)
+
+	return nil
+}
+
+func handlerAddFeed(s *state, cmd command) error {
+	if len(cmd.arguments) != 2 {
+		return fmt.Errorf("there should be two arguments for addfeed command - feed name and feed url")
+	}
+
+	currentUser, err := s.db.GetUserByName(context.Background(), s.cfg.CurrentUserName)
+	if err != nil {
+		return err
+	}
+
+	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
+		ID: uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Name: cmd.arguments[0],
+		Url: cmd.arguments[1],
+		UserID: currentUser.ID,
+	})
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("successfull add feed")
+	fmt.Println(feed)
+
+	return nil
+}
+
+func handlerFeeds(s *state, cmd command) error {
+	if len(cmd.arguments) != 0 {
+		return fmt.Errorf("there shouldn't be any arguments for feeds command")
+	}
+
+	feeds, err := s.db.GetFeeds(context.Background())
+	if err != nil {
+		fmt.Println("some error while retrieving feeds")
+
+		return err
+	}
+
+	for _, feed := range feeds {
+		msg := fmt.Sprintf("Name: %s, URL: %s", feed.Name, feed.Url)
+
+		user, err := s.db.GetUserById(context.Background(), feed.UserID)
+		if err != nil {
+			fmt.Println("some error while retrieving user who has added feed")
+
+			return err
+		}
+
+		fmt.Printf("%s, User: %s\n", msg, user.Name)
+	}
 
 	return nil
 }
