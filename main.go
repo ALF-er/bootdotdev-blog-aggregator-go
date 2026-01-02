@@ -55,8 +55,11 @@ func main() {
 	commandsMap.register("reset", handlerReset)
 	commandsMap.register("users", handlerUsers)
 	commandsMap.register("agg", handlerAggregate)
-	commandsMap.register("addfeed", handlerAddFeed)
+	commandsMap.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	commandsMap.register("feeds", handlerFeeds)
+	commandsMap.register("follow", middlewareLoggedIn(handlerFollow))
+	commandsMap.register("following", middlewareLoggedIn(handlerFollowing))
+	commandsMap.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 
 	if len(os.Args) < 2 {
 		fmt.Println("specify some command")
@@ -74,6 +77,19 @@ func main() {
 	}
 
 	os.Exit(0)
+}
+
+func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error {
+	return func(s *state, cmd command) error {
+		user, err := s.db.GetUserByName(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return err
+		}
+
+		handler(s, cmd, user)
+
+		return nil
+	}
 }
 
 func handlerRegister(s *state, cmd command) error {
@@ -183,14 +199,9 @@ func handlerAggregate(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAddFeed(s *state, cmd command) error {
+func handlerAddFeed(s *state, cmd command, currentUser database.User) error {
 	if len(cmd.arguments) != 2 {
 		return fmt.Errorf("there should be two arguments for addfeed command - feed name and feed url")
-	}
-
-	currentUser, err := s.db.GetUserByName(context.Background(), s.cfg.CurrentUserName)
-	if err != nil {
-		return err
 	}
 
 	feed, err := s.db.CreateFeed(context.Background(), database.CreateFeedParams{
@@ -202,6 +213,19 @@ func handlerAddFeed(s *state, cmd command) error {
 		UserID: currentUser.ID,
 	})
 	if err != nil {
+		return err
+	}
+
+	_, err = s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID: uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID: currentUser.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		fmt.Println("some error while following the feed")
+
 		return err
 	}
 
@@ -235,6 +259,82 @@ func handlerFeeds(s *state, cmd command) error {
 
 		fmt.Printf("%s, User: %s\n", msg, user.Name)
 	}
+
+	return nil
+}
+
+func handlerFollow(s *state, cmd command, currentUser database.User) error {
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("there should be one argument for follow command - url of feed to follow")
+	}
+
+	feed, err := s.db.GetFeedByURL(context.Background(), cmd.arguments[0])
+	if err != nil {
+		fmt.Println("some error while retrieving feed to follow")
+
+		return err
+	}
+
+	feed_follow, err := s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+		ID: uuid.New(),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		UserID: currentUser.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		fmt.Println("some error while following the feed")
+
+		return err
+	}
+
+	fmt.Printf("successfully following feed: %s, by: %s\n", feed_follow.FeedName, feed_follow.UserName)
+
+	return nil
+}
+
+func handlerFollowing(s *state, cmd command, currentUser database.User) error {
+	if len(cmd.arguments) != 0 {
+		return fmt.Errorf("there shouldn't be any arguments for following command")
+	}
+
+	user_feed_follows, err := s.db.GetFeedFollowsForUser(context.Background(), currentUser.ID)
+	if err != nil {
+		fmt.Println("some error while retrieving feeds followed by current user")
+
+		return err
+	}
+
+	for _, follows := range user_feed_follows {
+		fmt.Printf("%s\n", follows.FeedName)
+	}
+
+	return nil
+}
+
+func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("there should be one argument for unfollow command - url of feed to unfollow")
+	}
+
+	feed, err := s.db.GetFeedByURL(context.Background(), cmd.arguments[0])
+	if err != nil {
+		fmt.Println("some error while retrieving feed to unfollow")
+
+		return err
+	}
+
+	err = s.db.RemoveFeedFollowsForUser(context.Background(), database.RemoveFeedFollowsForUserParams{
+		UserID: currentUser.ID,
+		FeedID: feed.ID,
+	})
+	if err != nil {
+		fmt.Println("some error while removing feed follow")
+
+		return err
+	}
+
+	fmt.Println("successfull unfollow")
 
 	return nil
 }

@@ -1,0 +1,13 @@
+-- +goose Up
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE TABLE feed_follows (
+	id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+	created_at TIMESTAMP NOT NULL,
+	updated_at TIMESTAMP NOT NULL,
+	user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+	feed_id uuid NOT NULL REFERENCES feeds(id) ON DELETE CASCADE,
+	CONSTRAINT u_constraint UNIQUE (user_id, feed_id)
+);
+
+-- +goose Down
+DROP TABLE feed_follows;
