@@ -92,6 +92,37 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 	}
 }
 
+func scrapeFeeds(s *state) error {
+	feed_to_fetch, err := s.db.GetNextFeedToFetch(context.Background())
+	if err != nil {
+		fmt.Println("some error while getting next feed to fetch")
+
+		return err
+	}
+
+	err = s.db.MarkFeedFetched(context.Background(), feed_to_fetch.ID)
+	if err != nil {
+		fmt.Println("some error while marking feed as fetched")
+
+		return err
+	}
+
+	feed, err := rss.FetchFeed(context.Background(), feed_to_fetch.Url)
+	if err != nil {
+		fmt.Println("some error while fetching feed")
+
+		return err
+	}
+
+	fmt.Printf("\nFeed \"%s\":\n", feed.Channel.Title)
+
+	for _, item := range feed.Channel.Item {
+		fmt.Println(item.Title)
+	}
+
+	return nil
+}
+
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.arguments) != 1 {
 		return fmt.Errorf("there should be one argument for register command - user name")
@@ -183,20 +214,23 @@ func handlerUsers(s *state, cmd command) error {
 }
 
 func handlerAggregate(s *state, cmd command) error {
-	if len(cmd.arguments) != 0 {
-		return fmt.Errorf("there shouldn't be any arguments for agg command")
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("there should be one argument for agg command - time between requests")
 	}
 
-	feed, err := rss.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	timeBetweenRequests, err := time.ParseDuration(cmd.arguments[0])
 	if err != nil {
-		fmt.Println("some error while fetching feed")
+		fmt.Println("error while parsing argument as time duration")
 
 		return err
 	}
 
-	fmt.Println(*feed)
+	fmt.Printf("Collecting feeds every %s\n\n", timeBetweenRequests.String())
 
-	return nil
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		scrapeFeeds(s)
+	}
 }
 
 func handlerAddFeed(s *state, cmd command, currentUser database.User) error {
