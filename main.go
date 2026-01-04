@@ -8,6 +8,7 @@ import (
 	"internal/database"
 	"internal/rss"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,12 +55,13 @@ func main() {
 	commandsMap.register("login", handlerLogin)
 	commandsMap.register("reset", handlerReset)
 	commandsMap.register("users", handlerUsers)
-	commandsMap.register("agg", handlerAggregate)
+	commandsMap.register("agg", middlewareLoggedIn(handlerAggregate))
 	commandsMap.register("addfeed", middlewareLoggedIn(handlerAddFeed))
 	commandsMap.register("feeds", handlerFeeds)
 	commandsMap.register("follow", middlewareLoggedIn(handlerFollow))
 	commandsMap.register("following", middlewareLoggedIn(handlerFollowing))
 	commandsMap.register("unfollow", middlewareLoggedIn(handlerUnfollow))
+	commandsMap.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	if len(os.Args) < 2 {
 		fmt.Println("specify some command")
@@ -93,31 +95,56 @@ func middlewareLoggedIn(handler func(s *state, cmd command, user database.User) 
 }
 
 func scrapeFeeds(s *state) error {
-	feed_to_fetch, err := s.db.GetNextFeedToFetch(context.Background())
+	feedToFetch, err := s.db.GetNextFeedToFetch(context.Background())
 	if err != nil {
 		fmt.Println("some error while getting next feed to fetch")
 
 		return err
 	}
 
-	err = s.db.MarkFeedFetched(context.Background(), feed_to_fetch.ID)
+	err = s.db.MarkFeedFetched(context.Background(), feedToFetch.ID)
 	if err != nil {
 		fmt.Println("some error while marking feed as fetched")
 
 		return err
 	}
 
-	feed, err := rss.FetchFeed(context.Background(), feed_to_fetch.Url)
+	feed, err := rss.FetchFeed(context.Background(), feedToFetch.Url)
 	if err != nil {
 		fmt.Println("some error while fetching feed")
 
 		return err
 	}
 
-	fmt.Printf("\nFeed \"%s\":\n", feed.Channel.Title)
+	fmt.Printf("\nScrapping feed \"%s\"\n", feed.Channel.Title)
 
-	for _, item := range feed.Channel.Item {
-		fmt.Println(item.Title)
+	for i, item := range feed.Channel.Item {
+		fmt.Printf("\t%d. %s\n", i, item.Title)
+
+		publishedAt, err := time.Parse(time.RFC1123Z, item.PubDate)
+		if err != nil {
+			fmt.Println("some error while parsing publishing time of the post")
+			fmt.Println(err)
+
+			return err
+		}
+
+		s.db.CreatePost(context.Background(), database.CreatePostParams{
+			ID: uuid.New(),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+			Title: sql.NullString{ String: item.Title, Valid: true },
+			Url: item.Link,
+			Description: sql.NullString{ String: item.Description, Valid: true },
+			PublishedAt: publishedAt,
+			FeedID: feedToFetch.ID,
+		})
+		// if err != nil {
+		// 	fmt.Println("some error while saving post")
+		// 	fmt.Println(err)
+		//
+		// 	return err
+		// }
 	}
 
 	return nil
@@ -213,7 +240,7 @@ func handlerUsers(s *state, cmd command) error {
 	return nil
 }
 
-func handlerAggregate(s *state, cmd command) error {
+func handlerAggregate(s *state, cmd command, currentUser database.User) error {
 	if len(cmd.arguments) != 1 {
 		return fmt.Errorf("there should be one argument for agg command - time between requests")
 	}
@@ -229,7 +256,11 @@ func handlerAggregate(s *state, cmd command) error {
 
 	ticker := time.NewTicker(timeBetweenRequests)
 	for ; ; <-ticker.C {
-		scrapeFeeds(s)
+		err = scrapeFeeds(s)
+
+		if err != nil {
+			return err
+		}
 	}
 }
 
@@ -369,6 +400,33 @@ func handlerUnfollow(s *state, cmd command, currentUser database.User) error {
 	}
 
 	fmt.Println("successfull unfollow")
+
+	return nil
+}
+
+func handlerBrowse(s *state, cmd command, currentUser database.User) error {
+	if len(cmd.arguments) != 1 {
+		return fmt.Errorf("there should be one argument for browse command - limit of posts")
+	}
+
+	limit, err := strconv.ParseInt(cmd.arguments[0], 10, 32)
+	if err != nil {
+		limit = 2
+	}
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: currentUser.ID,
+		Limit: int32(limit),
+	})
+	if err != nil {
+		fmt.Println("some error while retrieving users posts")
+
+		return err
+	}
+
+	for _, post := range posts {
+		fmt.Printf("Post \"%s\":\n", post.Title.String)
+		fmt.Printf("\t%s\n", post.Description.String)
+	}
 
 	return nil
 }
